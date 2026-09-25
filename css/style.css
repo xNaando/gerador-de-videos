@@ -284,15 +284,6 @@ textarea:focus, select:focus {
   text-align: center;
 }
 
-/* ---- footer ---- */
-.footer {
-  text-align: center;
-  padding: 20px;
-  color: var(--text-dim);
-  font-size: .82rem;
-}
-.footer a { color: var(--accent); text-decoration: none; }
-
 .hidden { display: none !important; }
 
 @media (max-width: 860px) {
