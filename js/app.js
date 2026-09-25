@@ -114,81 +114,96 @@ const MIME_CANDIDATES = [
   'video/webm',
 ];
 
-async function recordVideo(scenes, total, musicStyle) {
-  if (typeof MediaRecorder === 'undefined') {
-    throw new Error('Seu navegador não suporta gravação de vídeo (MediaRecorder).');
-  }
-
-  const dest = audioCtx.createMediaStreamDestination();
-  const stream = new MediaStream([
-    ...els.stage.captureStream(30).getVideoTracks(),
-    ...dest.stream.getAudioTracks(),
-  ]);
-  const renderer = new VideoRenderer(els.stage, scenes, audioCtx);
-  renderer.draw(0); // frame 1: o que o encoder já começa a receber
-
-  // isTypeSupported mente em alguns navegadores: aqui cada codec grava
-  // ~1.2s de verdade e só vence quem não disparar erro (sync ou async).
-  let rec = null, usedMime = '', chunks = [];
-  for (const mime of [...MIME_CANDIDATES, null]) {
-    if (mime && !MediaRecorder.isTypeSupported(mime)) continue;
+// Uma tentativa real de gravação completa com um codec.
+// Rejeita em qualquer falha de encoder (sync ou async) p/ o chamador
+// poder tentar o próximo candidato do zero.
+function attemptRecord(mime, dest, scenes, total, musicStyle) {
+  return new Promise((resolve, reject) => {
+    const stream = new MediaStream([
+      ...els.stage.captureStream(30).getVideoTracks(),
+      ...dest.stream.getAudioTracks(),
+    ]);
     const opts = { videoBitsPerSecond: 6_000_000, audioBitsPerSecond: 128_000 };
     if (mime) opts.mimeType = mime;
 
-    let candidate;
-    try { candidate = new MediaRecorder(stream, opts); }
-    catch (e) { console.warn(`recorder ${mime || 'padrão'} falhou ao criar:`, e); continue; }
+    let rec;
+    try { rec = new MediaRecorder(stream, opts); }
+    catch (e) { stream.getTracks().forEach(t => t.stop()); return reject(e); }
 
-    const myChunks = [];
-    candidate.ondataavailable = (e) => { if (e.data.size) myChunks.push(e.data); };
-    try {
-      await new Promise((res, rej) => {
-        candidate.onerror = (e) => rej(e.error || new Error('encoder'));
-        candidate.start(400);
-        setTimeout(res, 1200);
-      });
-      rec = candidate; usedMime = mime; chunks = myChunks;
-      rec.onerror = null;
-      break;
-    } catch (e) {
-      console.warn(`encoder rejeitou ${mime || 'padrão'}:`, e && e.message || e);
-      try { candidate.stop(); } catch {}
-    }
-  }
+    const chunks = [];
+    const renderer = new VideoRenderer(els.stage, scenes, audioCtx);
+    let raf = null, stopMusic = () => {}, narration = null, settled = false;
 
-  if (!rec) throw new Error('Nenhum codec de vídeo funcionou neste navegador.');
-  console.log('[codec]', usedMime || rec.mimeType, '|', navigator.userAgent);
-  currentRecorder = rec;
+    const cleanup = () => {
+      if (raf) cancelAnimationFrame(raf);
+      try { stopMusic(); } catch {}
+      if (narration) narration.stop();
+      stream.getVideoTracks().forEach(t => t.stop());
+    };
+    const fail = (e) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      try { rec.stop(); } catch {}
+      reject(e);
+    };
 
-  return new Promise((resolve, reject) => {
-    rec.onerror = (e) => reject(e.error || new Error('falha na gravação'));
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    rec.onerror = (e) => fail(e.error || new Error('encoder sem suporte'));
     rec.onstop = () => {
-      const type = usedMime || rec.mimeType || 'video/webm';
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const type = mime || rec.mimeType || 'video/webm';
       resolve({ blob: new Blob(chunks, { type }), mime: type });
     };
 
+    try { rec.start(400); } catch (e) { return fail(e); }
+
+    renderer.draw(0);
     const voiceSegs = scenes.filter(s => s.buffer)
       .map(s => ({ start: s.start, end: s.start + s.buffer.duration }));
-
-    const t0 = audioCtx.currentTime + 0.15;
-    scheduleNarration(audioCtx, dest, scenes, t0);
-    const stopMusic = startMusic(audioCtx, dest, musicStyle, t0, t0 + total, voiceSegs);
-
+    const t0 = audioCtx.currentTime + 0.2;
+    narration = scheduleNarration(audioCtx, dest, scenes, t0);
+    stopMusic = startMusic(audioCtx, dest, musicStyle, t0, t0 + total, voiceSegs);
     els.overlay.classList.add('hidden');
 
     const frame = () => {
       const t = audioCtx.currentTime - t0;
       renderer.draw(Math.max(0, t));
-      setProgress(0.55 + 0.45 * Math.max(0, t / total));
-      if (t >= total) {
-        stopMusic();
-        rec.stop();
-        return;
-      }
-      rafId = requestAnimationFrame(frame);
+      setProgress(0.55 + 0.45 * Math.max(0, Math.min(1, t / total)));
+      if (t >= total) { try { rec.stop(); } catch {} return; }
+      raf = requestAnimationFrame(frame);
     };
-    rafId = requestAnimationFrame(frame);
+    raf = requestAnimationFrame(frame);
   });
+}
+
+// Tenta cada codec como gravação completa; se o encoder falhar no
+// meio, o áudio é desmontado e a próxima tentativa regrava do zero.
+async function recordVideo(scenes, total, musicStyle) {
+  if (typeof MediaRecorder === 'undefined') {
+    throw new Error('Seu navegador não suporta gravação de vídeo (MediaRecorder).');
+  }
+  const dest = audioCtx.createMediaStreamDestination();
+  const candidates = MIME_CANDIDATES.filter(m => {
+    try { return MediaRecorder.isTypeSupported(m); } catch { return false; }
+  });
+  candidates.push(null); // padrão do navegador como último recurso
+
+  let lastErr = null;
+  for (const mime of candidates) {
+    try {
+      console.log('[codec] gravando com', mime || 'padrão do navegador');
+      const result = await attemptRecord(mime, dest, scenes, total, musicStyle);
+      console.log('[codec] sucesso:', mime || 'padrão');
+      return result;
+    } catch (e) {
+      lastErr = e;
+      console.warn(`[codec] ${mime || 'padrão'} falhou — tentando próximo:`, e && e.name, e && e.message || e);
+    }
+  }
+  throw lastErr || new Error('Nenhum codec de vídeo funcionou neste navegador.');
 }
 
 async function run() {

@@ -255,5 +255,15 @@ export function scheduleNarration(ctx, destNode, scenes, t0) {
     src.start(t0 + sc.start);
     sources.push(src);
   }
-  return sources;
+  return {
+    sources,
+    // mata a narração inteira p/ poder regravar com outro codec
+    stop() {
+      for (const s of sources) {
+        try { s.stop(0); } catch {}
+        try { s.disconnect(); } catch {}
+      }
+      try { voiceBus.disconnect(); } catch {}
+    },
+  };
 }
