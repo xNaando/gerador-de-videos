@@ -19,21 +19,93 @@ const STYLE_PROMPTS = {
   retro: 'retro vaporwave aesthetic, 80s synthwave, sunset grid, purple pink gradient, nostalgic',
 };
 
-const FALLBACK_SCRIPTS = (topic, n) => {
-  const scenes = [
-    { narration: `Você sabia disso sobre ${topic}? Fica até o final que vale a pena.`, subtitle: 'VOCÊ SABIA?', image_prompt: topic },
-    { narration: `A maioria das pessoas não faz ideia de como ${topic} pode mudar tudo.`, subtitle: 'QUASE NINGUÉM SABE', image_prompt: topic },
-    { narration: `O segredo está em começar pequeno e ser consistente todos os dias.`, subtitle: 'O SEGREDO', image_prompt: topic },
-    { narration: `E o mais importante: nunca é tarde para começar.`, subtitle: 'NUNCA É TARDE', image_prompt: topic },
-    { narration: `Gostou? Segue pra mais conteúdo como esse e compartilha com alguém!`, subtitle: 'SEGUE PRA MAIS!', image_prompt: topic },
-  ];
-  return {
-    title: topic,
-    caption: `✨ ${topic} — salva esse vídeo pra não esquecer!`,
-    hashtags: ['#fyp', '#viral', '#dicas', '#aprenda', '#tiktok'],
-    scenes: scenes.slice(0, n),
-  };
+// ---------- Gerador local de roteiros (quando o LLM está fora) ----------
+
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+const HOOKS = [
+  (t) => `Para de rolar! Isso sobre ${t} vai mudar seu dia.`,
+  (t) => `Ninguém te conta isso sobre ${t}. Presta atenção.`,
+  (t) => `Se você se interessa por ${t}, esse vídeo é pra você.`,
+  (t) => `Você vai querer salvar isso: ${t} do jeito certo.`,
+  (t) => `O erro que 90% das pessoas cometem com ${t}.`,
+  (t) => `${t}: a verdade que quase ninguém fala.`,
+];
+
+const BODIES = [
+  (t) => `A maioria das pessoas complica demais. O segredo de ${t} é constância, não perfeição.`,
+  (t) => `Comece pequeno: 5 minutos por dia já muda tudo quando o assunto é ${t}.`,
+  (t) => `O que funciona de verdade em ${t} é simplicidade. Esquece as fórmulas mirabolantes.`,
+  (t) => `Quem domina ${t} não faz nada mágico — faz o básico todos os dias.`,
+  (t) => `A parte que quase todo mundo pula em ${t} é exatamente a que mais importa.`,
+  (t) => `Resultado não vem de sorte: em ${t}, vem de fazer o simples com consistência.`,
+  (t) => `Um detalhe que faz toda diferença em ${t}: comece hoje, não segunda que vem.`,
+];
+
+const CTAS = [
+  `Gostou? Segue a página pra mais conteúdo assim e manda pra alguém que precisa ver isso!`,
+  `Salva esse vídeo pra não esquecer e segue a gente que vem muito mais!`,
+  `Se isso te ajudou, já sabe: curte, comenta e segue pra próxima!`,
+  `Quer mais dicas assim? Segue a gente — o próximo vídeo tá ainda melhor!`,
+];
+
+const SUBTITLES = {
+  hook: ['PRESTA ATENÇÃO', 'OLHA ISSO', 'PARA TUDO', 'ESCUTA ISSO', 'VOCÊ PRECISA VER'],
+  body: ['O SEGREDO', 'O QUE FUNCIONA', 'NINGUÉM FALA ISSO', 'SIMPLES ASSIM', 'ANOTA AÍ', 'A CHAVE'],
+  cta: ['SEGUE PRA MAIS!', 'SALVA ESSE VÍDEO', 'COMPARTILHA!', 'BORA COMEÇAR'],
 };
+
+// mapa pt→en das palavras mais comuns p/ busca de fotos
+const EN_MAP = {
+  treino: 'workout', treinos: 'workout', academia: 'gym', casa: 'home',
+  receita: 'recipe', receitas: 'recipes', comida: 'food', fit: 'fitness',
+  saúde: 'health', saude: 'health', dinheiro: 'money', estudo: 'study',
+  produtividade: 'productivity', viagem: 'travel', praia: 'beach',
+  fotografia: 'photography', yoga: 'yoga', corrida: 'running',
+  emagrecimento: 'weight loss', meditação: 'meditation', música: 'music',
+  musica: 'music', tecnologia: 'technology', negócios: 'business',
+  marketing: 'marketing', vendas: 'sales', moda: 'fashion', beleza: 'beauty',
+};
+
+function searchKeywords(topic) {
+  const words = topic.toLowerCase()
+    .replace(/[^\wà-ú\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 2);
+  const mapped = words.map(w => EN_MAP[w] || w);
+  return [...new Set(mapped)].slice(0, 3).join(' ') || 'lifestyle';
+}
+
+function localScript(topic, n) {
+  const scenes = [];
+  scenes.push({
+    narration: pick(HOOKS)(topic),
+    subtitle: pick(SUBTITLES.hook),
+    image_prompt: `${topic}, eye-catching scene`,
+    search: searchKeywords(topic),
+  });
+  const bodies = [...BODIES].sort(() => Math.random() - 0.5);
+  for (let i = 0; i < n - 2; i++) {
+    scenes.push({
+      narration: bodies[i % bodies.length](topic),
+      subtitle: pick(SUBTITLES.body),
+      image_prompt: `${topic}, scene ${i + 2}, different angle`,
+      search: searchKeywords(topic),
+    });
+  }
+  scenes.push({
+    narration: pick(CTAS),
+    subtitle: pick(SUBTITLES.cta),
+    image_prompt: `${topic}, inspiring finale, bright`,
+    search: searchKeywords(topic),
+  });
+  return {
+    title: topic.slice(0, 60),
+    caption: `✨ ${topic} — salva esse vídeo pra não esquecer!`,
+    hashtags: ['#fyp', '#viral', '#dicas', '#aprendanotiktok', '#reels'],
+    scenes,
+  };
+}
 
 // Extrai JSON mesmo se o modelo truncar ou malformar a resposta:
 // primeiro tenta parse direto; se falhar, vasculha objetos completos
@@ -113,10 +185,14 @@ export async function generateScript(topic, style, nScenes) {
   ].join(' ');
 
   try {
-    const res = await fetchWithRetry(
-      `${TEXT_API}/${encodeURIComponent(prompt)}?model=openai`,
-      {}, 3, 3000
-    );
+    // o Pollinations legacy está instável — falha rápido com timeout
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    const res = await fetch(
+      `${TEXT_API}/${encodeURIComponent(prompt)}?model=openai&referrer=videosgratis`,
+      { signal: ctrl.signal }
+    ).finally(() => clearTimeout(timer));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
     const data = extractJSON(text);
     if (!Array.isArray(data.scenes) || data.scenes.length === 0) throw new Error('sem cenas');
@@ -130,8 +206,8 @@ export async function generateScript(topic, style, nScenes) {
     data.hashtags = Array.isArray(data.hashtags) ? data.hashtags : [];
     return data;
   } catch (e) {
-    console.warn('LLM falhou, usando roteiro fallback:', e);
-    return FALLBACK_SCRIPTS(topic, nScenes);
+    console.warn('LLM indisponível, usando gerador local:', e);
+    return localScript(topic, nScenes);
   }
 }
 
@@ -142,6 +218,7 @@ export function imageURL(prompt, style, seed, model = 'flux') {
   const params = new URLSearchParams({
     width: '720', height: '1280', seed: String(seed),
     nologo: 'true', model, enhance: 'true',
+    referrer: 'videosgratis',
   });
   return `${IMAGE_API}/${encodeURIComponent(full)}?${params}`;
 }

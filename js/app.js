@@ -106,65 +106,103 @@ function drawIdleFrame(canvas, label) {
   ctx.fillText(label, 360, 640);
 }
 
-function pickMime() {
-  const candidates = [
-    'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
-    'video/mp4',
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
-    'video/webm',
-  ];
-  return candidates.find(m => MediaRecorder.isTypeSupported(m)) || '';
-}
+const MIME_CANDIDATES = [
+  'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+  'video/mp4',
+  'video/webm;codecs=vp9,opus',
+  'video/webm;codecs=vp8,opus',
+  'video/webm',
+];
 
-function recordVideo(scenes, total, musicStyle) {
-  return new Promise((resolve, reject) => {
-    const canvasStream = els.stage.captureStream(30);
-    const dest = audioCtx.createMediaStreamDestination();
-    const stream = new MediaStream([
-      ...canvasStream.getVideoTracks(),
-      ...dest.stream.getAudioTracks(),
+// isTypeSupported mente em alguns navegadores — sondamos de verdade:
+// cria um MediaRecorder num stream descartável e vê se o encoder
+// aceita a config sem disparar EncodingError.
+async function probeMime(canvas, destStream) {
+  for (const mime of MIME_CANDIDATES) {
+    if (!MediaRecorder.isTypeSupported(mime)) continue;
+    const probeVideo = canvas.captureStream(30).getVideoTracks()[0];
+    const probeStream = new MediaStream([
+      probeVideo,
+      ...destStream.getAudioTracks(),
     ]);
-
-    const mime = pickMime();
-    const rec = new MediaRecorder(stream, {
-      ...(mime ? { mimeType: mime } : {}),
+    const rec = new MediaRecorder(probeStream, {
+      mimeType: mime,
       videoBitsPerSecond: 6_000_000,
       audioBitsPerSecond: 128_000,
     });
-    currentRecorder = rec;
+    try {
+      await new Promise((res, rej) => {
+        rec.onerror = (e) => rej(e.error || new Error('encoder'));
+        rec.start(200);
+        setTimeout(res, 900);
+      });
+      rec.stop();
+      probeVideo.stop();
+      return mime; // encoder aceitou
+    } catch (e) {
+      console.warn(`codec ${mime} rejeitado pelo encoder:`, e.message || e);
+      try { rec.stop(); } catch {}
+      probeVideo.stop();
+    }
+  }
+  return ''; // deixa o navegador escolher
+}
 
-    const chunks = [];
-    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-    rec.onerror = (e) => reject(e.error || new Error('falha na gravação'));
-    rec.onstop = () => {
-      const type = mime || 'video/webm';
-      resolve({ blob: new Blob(chunks, { type }), mime: type });
-    };
+function recordVideo(scenes, total, musicStyle) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const dest = audioCtx.createMediaStreamDestination();
 
-    const renderer = new VideoRenderer(els.stage, scenes, audioCtx);
-    const voiceSegs = scenes.filter(s => s.buffer)
-      .map(s => ({ start: s.start, end: s.start + s.buffer.duration }));
+      // sonda qual codec o encoder realmente aceita
+      const mime = await probeMime(els.stage, dest.stream);
 
-    const t0 = audioCtx.currentTime + 0.15;
-    scheduleNarration(audioCtx, dest, scenes, t0);
-    const stopMusic = startMusic(audioCtx, dest, musicStyle, t0, t0 + total, voiceSegs);
+      const canvasStream = els.stage.captureStream(30);
+      const stream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...dest.stream.getAudioTracks(),
+      ]);
 
-    rec.start(500);
-    els.overlay.classList.add('hidden');
+      const rec = new MediaRecorder(stream, {
+        ...(mime ? { mimeType: mime } : {}),
+        videoBitsPerSecond: 6_000_000,
+        audioBitsPerSecond: 128_000,
+      });
+      currentRecorder = rec;
 
-    const frame = () => {
-      const t = audioCtx.currentTime - t0;
-      renderer.draw(Math.max(0, t));
-      setProgress(0.55 + 0.45 * Math.max(0, t / total));
-      if (t >= total) {
-        stopMusic();
-        rec.stop();
-        return;
-      }
+      const chunks = [];
+      rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      rec.onerror = (e) => reject(e.error || new Error('falha na gravação'));
+      rec.onstop = () => {
+        const type = mime || 'video/webm';
+        resolve({ blob: new Blob(chunks, { type }), mime: type });
+      };
+
+      const renderer = new VideoRenderer(els.stage, scenes, audioCtx);
+      const voiceSegs = scenes.filter(s => s.buffer)
+        .map(s => ({ start: s.start, end: s.start + s.buffer.duration }));
+
+      const t0 = audioCtx.currentTime + 0.15;
+      scheduleNarration(audioCtx, dest, scenes, t0);
+      const stopMusic = startMusic(audioCtx, dest, musicStyle, t0, t0 + total, voiceSegs);
+
+      rec.start(500);
+      els.overlay.classList.add('hidden');
+
+      const frame = () => {
+        const t = audioCtx.currentTime - t0;
+        renderer.draw(Math.max(0, t));
+        setProgress(0.55 + 0.45 * Math.max(0, t / total));
+        if (t >= total) {
+          stopMusic();
+          rec.stop();
+          return;
+        }
+        rafId = requestAnimationFrame(frame);
+      };
       rafId = requestAnimationFrame(frame);
-    };
-    rafId = requestAnimationFrame(frame);
+    } catch (e) {
+      reject(e);
+    }
   });
 }
 
