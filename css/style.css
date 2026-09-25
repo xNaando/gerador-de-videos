@@ -243,12 +243,15 @@ textarea:focus, select:focus {
 /* ---- resultado ---- */
 .result {
   width: 100%;
+  max-width: 330px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
 #result-video {
   width: 100%;
+  aspect-ratio: 9 / 16;
   border-radius: 12px;
   border: 1px solid var(--panel-border);
   background: #000;
