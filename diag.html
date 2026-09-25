@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"><title>Diagnóstico de codecs</title>
+<style>
+  body{font-family:monospace;background:#0a0a12;color:#eee;padding:30px;font-size:14px}
+  .ok{color:#22c55e}.fail{color:#ef4444}.wait{color:#fbbf24}
+  canvas{width:90px;height:160px;border:1px solid #333;display:block;margin-top:12px}
+  h2{font-size:16px;margin-top:24px}
+</style>
+</head>
+<body>
+<h1>Diagnóstico MediaRecorder</h1>
+<div id="ua"></div>
+<h2>1. isTypeSupported()</h2><div id="support"></div>
+<h2>2. Teste real de gravação (1s cada)</h2><div id="probe"></div>
+<canvas id="c" width="720" height="1280"></canvas>
+<script>
+const MIMES = [
+  'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+  'video/mp4',
+  'video/webm;codecs=vp9,opus',
+  'video/webm;codecs=vp8,opus',
+  'video/webm',
+];
+const ua = document.getElementById('ua');
+const support = document.getElementById('support');
+const probe = document.getElementById('probe');
+const canvas = document.getElementById('c');
+const ctx2d = canvas.getContext('2d');
+
+function line(el, txt, cls) {
+  const d = document.createElement('div');
+  d.className = cls || '';
+  d.textContent = txt;
+  el.appendChild(d);
+}
+
+ua.textContent = 'UA: ' + navigator.userAgent;
+line(support, 'MediaRecorder existe: ' + (typeof MediaRecorder !== 'undefined'), 'ok');
+if (typeof MediaRecorder !== 'undefined') {
+  for (const m of MIMES) {
+    line(support, `${MediaRecorder.isTypeSupported(m) ? 'SIM' : 'não'}  →  ${m}`, MediaRecorder.isTypeSupported(m) ? 'ok' : 'fail');
+  }
+}
+
+// pinta frames animados p/ o encoder ter conteúdo real
+let raf;
+(function paint() {
+  const t = performance.now() / 1000;
+  const g = ctx2d.createLinearGradient(0, 0, 720, 1280);
+  g.addColorStop(0, `hsl(${t * 40 % 360},70%,40%)`);
+  g.addColorStop(1, '#111');
+  ctx2d.fillStyle = g; ctx2d.fillRect(0, 0, 720, 1280);
+  ctx2d.fillStyle = '#fff'; ctx2d.font = '80px sans-serif';
+  ctx2d.fillText('teste ' + t.toFixed(1), 100, 640);
+  raf = requestAnimationFrame(paint);
+})();
+
+(async () => {
+  if (typeof MediaRecorder === 'undefined') { line(probe, 'sem MediaRecorder — fim', 'fail'); return; }
+  const actx = new AudioContext();
+  await actx.resume();
+  const dest = actx.createMediaStreamDestination();
+  // toca um seno p/ a trilha de áudio ter sinal
+  const osc = actx.createOscillator(); osc.frequency.value = 440;
+  const g = actx.createGain(); g.gain.value = 0.1;
+  osc.connect(g).connect(dest); osc.start();
+
+  for (const m of [...MIMES, null]) {
+    const name = m || '(padrão do navegador)';
+    if (m && !MediaRecorder.isTypeSupported(m)) { line(probe, `– ${name}: pulado (não suportado)`, 'wait'); continue; }
+    const stream = new MediaStream([
+      ...canvas.captureStream(30).getVideoTracks(),
+      ...dest.stream.getAudioTracks(),
+    ]);
+    let rec;
+    try { rec = new MediaRecorder(stream, m ? { mimeType: m, videoBitsPerSecond: 6e6, audioBitsPerSecond: 128e3 } : { videoBitsPerSecond: 6e6, audioBitsPerSecond: 128e3 }); }
+    catch (e) { line(probe, `✗ ${name}: ${e.name} ${e.message}`, 'fail'); continue; }
+    const res = await new Promise(r => {
+      let size = 0;
+      rec.ondataavailable = e => size += e.data.size;
+      rec.onerror = e => r({ err: (e.error && (e.error.name + ' ' + e.error.message)) || 'erro' });
+      rec.onstop = () => r({ size });
+      rec.start(300);
+      setTimeout(() => { try { rec.stop(); } catch { r({ err: 'stop falhou' }); } }, 1200);
+    });
+    stream.getTracks().forEach(t => t.stop());
+    if (res.err) line(probe, `✗ ${name}: ${res.err}`, 'fail');
+    else line(probe, `✓ ${name}: gravou ${(res.size / 1024).toFixed(0)} KB (${rec.mimeType})`, 'ok');
+  }
+  osc.stop();
+  line(probe, '— fim do diagnóstico —', 'wait');
+})();
+</script>
+</body>
+</html>
