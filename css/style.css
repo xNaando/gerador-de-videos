@@ -112,16 +112,6 @@ body {
 /* ---- mini-games ---- */
 .game-panel { text-align: center; }
 .game-title { font-size: 1rem; font-weight: 700; margin-bottom: 10px; }
-.game-tabs {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  margin-bottom: 12px;
-}
-.game-tabs .btn-mini.active {
-  border-color: var(--accent);
-  color: #fff;
-}
 .game-canvas {
   display: block;
   margin: 0 auto;
@@ -144,44 +134,31 @@ body {
   font-size: .9rem;
 }
 .game-over span { color: var(--text-dim); }
-.reaction-pad {
-  border-radius: 12px;
-  border: 1px solid var(--panel-border);
-  background: #1a1030;
-  min-height: 200px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-  user-select: none;
-  font-size: 1rem;
-  transition: background .15s;
-}
-.reaction-pad span { color: var(--text-dim); font-size: .85rem; }
-.reaction-pad.waiting { background: #3a1520; }
-.reaction-pad.go { background: #14532d; }
-.whack-grid {
+.dpad {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  max-width: 280px;
-  margin: 0 auto;
+  grid-template-columns: repeat(3, 56px);
+  gap: 8px;
+  justify-content: center;
+  margin-top: 12px;
 }
-.whack-cell {
-  aspect-ratio: 1;
+.dpad button {
+  width: 56px;
+  height: 48px;
   border-radius: 12px;
   border: 1px solid var(--panel-border);
   background: #0e0e18;
-  font-size: 2rem;
+  color: var(--text);
+  font-size: 1.1rem;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform .08s;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background .1s, transform .08s;
 }
-.whack-cell:active { transform: scale(.92); }
+.dpad button:active {
+  background: var(--accent);
+  transform: scale(.92);
+}
 
 /* ---- campos ---- */
 .field { display: flex; flex-direction: column; gap: 6px; }

@@ -1,9 +1,8 @@
 // ============================================================
-// minigames.js — joguinhos leves p/ passar o tempo enquanto
-// o vídeo é gerado. Cada jogo retorna uma função de cleanup.
+// minigames.js — Snake p/ passar o tempo enquanto o vídeo
+// é gerado. Teclado (setas/WASD), swipe no canvas ou D-pad.
 // ============================================================
 
-const GAMES = { snake: mountSnake, reaction: mountReaction, whack: mountWhack };
 let mgCleanup = null;
 
 function startMinigame() {
@@ -11,18 +10,9 @@ function startMinigame() {
   if (!box) return;
   box.classList.remove('hidden');
   const stage = document.getElementById('game-stage');
-  const tabs = box.querySelectorAll('[data-game]');
-
-  const mount = (name) => {
-    if (mgCleanup) { mgCleanup(); mgCleanup = null; }
-    stage.innerHTML = '';
-    mgCleanup = GAMES[name](stage);
-    tabs.forEach(t => t.classList.toggle('active', t.dataset.game === name));
-  };
-
-  tabs.forEach(t => t.onclick = () => mount(t.dataset.game));
-  const names = Object.keys(GAMES);
-  mount(names[Math.floor(Math.random() * names.length)]);
+  if (mgCleanup) { mgCleanup(); mgCleanup = null; }
+  stage.innerHTML = '';
+  mgCleanup = mountSnake(stage);
 }
 
 function stopMinigame() {
@@ -31,33 +21,36 @@ function stopMinigame() {
   if (box) box.classList.add('hidden');
 }
 
-// ---------- helpers ----------
-function el(tag, cls, parent) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (parent) parent.appendChild(e);
-  return e;
-}
-function gameOver(stage, score, onRetry) {
-  const ov = el('div', 'game-over', stage);
-  ov.innerHTML = `<b>Fim de jogo!</b><span>${score} pontos</span><button class="btn-mini">Jogar de novo</button>`;
-  ov.querySelector('button').onclick = onRetry;
-  return ov;
-}
-
 // ---------- 🐍 SNAKE ----------
 function mountSnake(root) {
   const C = 14, S = 20, SZ = C * S;
-  el('div', 'game-score', root).innerHTML = 'Pontos: <b id="mg-score">0</b> · ⬆️⬇️⬅️➡️ ou arrasta';
-  const cv = el('canvas', 'game-canvas', root);
+  const score = document.createElement('div');
+  score.className = 'game-score';
+  score.innerHTML = 'Pontos: <b>0</b>';
+  root.appendChild(score);
+  const scoreEl = score.querySelector('b');
+
+  const cv = document.createElement('canvas');
+  cv.className = 'game-canvas';
   cv.width = SZ; cv.height = SZ;
+  root.appendChild(cv);
   const ctx = cv.getContext('2d');
 
-  let snake, dir, nextDir, apple, score, alive, speed;
+  // D-pad p/ celular (e quem preferir clicar)
+  const dpad = document.createElement('div');
+  dpad.className = 'dpad';
+  dpad.innerHTML =
+    '<span></span><button data-dir="up" aria-label="cima">▲</button><span></span>' +
+    '<button data-dir="left" aria-label="esquerda">◀</button>' +
+    '<button data-dir="down" aria-label="baixo">▼</button>' +
+    '<button data-dir="right" aria-label="direita">▶</button>';
+  root.appendChild(dpad);
+
+  let snake, dir, nextDir, apple, pts, alive;
   const reset = () => {
     snake = [{ x: 7, y: 7 }]; dir = { x: 1, y: 0 }; nextDir = dir;
-    apple = spawn(); score = 0; alive = true; speed = 150;
-    root.querySelector('#mg-score').textContent = '0';
+    apple = spawn(); pts = 0; alive = true;
+    scoreEl.textContent = '0';
     const ov = root.querySelector('.game-over'); if (ov) ov.remove();
   };
   const spawn = () => {
@@ -66,27 +59,38 @@ function mountSnake(root) {
     while (snake.some(s => s.x === p.x && s.y === p.y));
     return p;
   };
+  const setDir = (d) => {
+    if (alive && (d.x !== -dir.x || d.y !== -dir.y)) nextDir = d;
+  };
 
+  const DIRS = {
+    up: { x: 0, y: -1 }, down: { x: 0, y: 1 },
+    left: { x: -1, y: 0 }, right: { x: 1, y: 0 },
+  };
   const onKey = (e) => {
-    const k = e.key;
     const map = {
-      ArrowUp: { x: 0, y: -1 }, w: { x: 0, y: -1 }, W: { x: 0, y: -1 },
-      ArrowDown: { x: 0, y: 1 }, s: { x: 0, y: 1 }, S: { x: 0, y: 1 },
-      ArrowLeft: { x: -1, y: 0 }, a: { x: -1, y: 0 }, A: { x: -1, y: 0 },
-      ArrowRight: { x: 1, y: 0 }, d: { x: 1, y: 0 }, D: { x: 1, y: 0 },
+      ArrowUp: 'up', w: 'up', W: 'up',
+      ArrowDown: 'down', s: 'down', S: 'down',
+      ArrowLeft: 'left', a: 'left', A: 'left',
+      ArrowRight: 'right', d: 'right', D: 'right',
     };
-    const d = map[k];
-    if (!d || !alive) return;
-    if (d.x !== -dir.x || d.y !== -dir.y) nextDir = d;
-    if (k.startsWith('Arrow')) e.preventDefault();
+    const name = map[e.key];
+    if (!name) return;
+    setDir(DIRS[name]);
+    if (e.key.startsWith('Arrow')) e.preventDefault();
+  };
+  const onPad = (e) => {
+    const b = e.target.closest('[data-dir]');
+    if (!b) return;
+    setDir(DIRS[b.dataset.dir]);
+    e.preventDefault();
   };
   let tx = 0, ty = 0;
   const onTS = (e) => { tx = e.touches[0].clientX; ty = e.touches[0].clientY; };
   const onTE = (e) => {
     const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty;
     if (Math.abs(dx) < 20 && Math.abs(dy) < 20) return;
-    const d = Math.abs(dx) > Math.abs(dy) ? { x: Math.sign(dx), y: 0 } : { x: 0, y: Math.sign(dy) };
-    if (d.x !== -dir.x || d.y !== -dir.y) nextDir = d;
+    setDir(Math.abs(dx) > Math.abs(dy) ? { x: Math.sign(dx), y: 0 } : { x: 0, y: Math.sign(dy) });
     e.preventDefault();
   };
 
@@ -96,13 +100,17 @@ function mountSnake(root) {
     const h = { x: (snake[0].x + dir.x + C) % C, y: (snake[0].y + dir.y + C) % C };
     if (snake.some(s => s.x === h.x && s.y === h.y)) {
       alive = false;
-      gameOver(root, score, reset);
+      const ov = document.createElement('div');
+      ov.className = 'game-over';
+      ov.innerHTML = `<b>Fim de jogo!</b><span>${pts} pontos</span><button class="btn-mini">Jogar de novo</button>`;
+      ov.querySelector('button').onclick = reset;
+      root.appendChild(ov);
       return;
     }
     snake.unshift(h);
     if (h.x === apple.x && h.y === apple.y) {
-      score++;
-      root.querySelector('#mg-score').textContent = score;
+      pts++;
+      scoreEl.textContent = pts;
       apple = spawn();
     } else snake.pop();
 
@@ -121,6 +129,7 @@ function mountSnake(root) {
   }, 140);
 
   window.addEventListener('keydown', onKey);
+  dpad.addEventListener('pointerdown', onPad);
   cv.addEventListener('touchstart', onTS, { passive: true });
   cv.addEventListener('touchend', onTE);
   reset();
@@ -128,76 +137,8 @@ function mountSnake(root) {
   return () => {
     clearInterval(iv);
     window.removeEventListener('keydown', onKey);
+    dpad.removeEventListener('pointerdown', onPad);
     cv.removeEventListener('touchstart', onTS);
     cv.removeEventListener('touchend', onTE);
   };
-}
-
-// ---------- ⚡ REFLEXO ----------
-function mountReaction(root) {
-  el('div', 'game-score', root).innerHTML = 'Melhor: <b id="mg-best">—</b> ms';
-  const pad = el('div', 'reaction-pad', root);
-  pad.innerHTML = '<b>⚡ Reflexo</b><span>Toque pra começar</span>';
-  let state = 'idle', t0 = 0, timer = null, best = Infinity;
-  const bestEl = root.querySelector('#mg-best');
-
-  pad.onclick = () => {
-    if (state === 'idle' || state === 'done' || state === 'early') {
-      state = 'wait';
-      pad.className = 'reaction-pad waiting';
-      pad.innerHTML = '<b>Espera o verde...</b>';
-      timer = setTimeout(() => {
-        state = 'go';
-        t0 = performance.now();
-        pad.className = 'reaction-pad go';
-        pad.innerHTML = '<b>AGORA!</b>';
-      }, 1200 + Math.random() * 2800);
-    } else if (state === 'wait') {
-      clearTimeout(timer);
-      state = 'early';
-      pad.className = 'reaction-pad';
-      pad.innerHTML = '<b>Cedo demais 😅</b><span>Toque pra tentar de novo</span>';
-    } else if (state === 'go') {
-      const ms = Math.round(performance.now() - t0);
-      if (ms < best) { best = ms; bestEl.textContent = ms; }
-      state = 'done';
-      pad.className = 'reaction-pad';
-      pad.innerHTML = `<b>${ms} ms</b><span>${ms < 250 ? 'Rápido demais 🔥' : ms < 400 ? 'Bom reflexo!' : 'Da pra melhorar!'} — toca de novo</span>`;
-    }
-  };
-
-  return () => clearTimeout(timer);
-}
-
-// ---------- 🎯 MIRA ----------
-function mountWhack(root) {
-  el('div', 'game-score', root).innerHTML = 'Acertos: <b id="mg-hits">0</b> · Clique nos alvos!';
-  const grid = el('div', 'whack-grid', root);
-  const cells = [];
-  for (let i = 0; i < 9; i++) cells.push(el('button', 'whack-cell', grid));
-
-  let hits = 0, alive = null, hideT = null;
-  const hitsEl = root.querySelector('#mg-hits');
-  const TARGETS = ['\u{1F3AF}', '\u{2B50}', '\u{1F525}', '\u{1F4A5}', '\u26A1'];
-
-  const pop = () => {
-    if (alive) { alive.textContent = ''; alive = null; }
-    const c = cells[(Math.random() * cells.length) | 0];
-    c.textContent = TARGETS[(Math.random() * TARGETS.length) | 0];
-    alive = c;
-    hideT = setTimeout(() => { if (alive === c) { c.textContent = ''; alive = null; } }, 750);
-  };
-  const iv = setInterval(pop, 700);
-
-  const onHit = (e) => {
-    if (e.target === alive && alive.textContent) {
-      hits++;
-      hitsEl.textContent = hits;
-      alive.textContent = '\u{1F4A5}';
-      alive = null;
-    }
-  };
-  grid.addEventListener('pointerdown', onHit);
-
-  return () => { clearInterval(iv); clearTimeout(hideT); grid.removeEventListener('pointerdown', onHit); };
 }
