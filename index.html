@@ -18,6 +18,8 @@
   </header>
 
   <main class="layout">
+    <!-- ============ COLUNA ESQUERDA ============ -->
+    <div class="left-col">
     <!-- ============ PAINEL DE CONTROLE ============ -->
     <section class="panel controls">
       <label class="field">
@@ -84,6 +86,15 @@
       <div id="error-box" class="error-box hidden"></div>
     </section>
 
+    <!-- ============ DOAÇÃO ============ -->
+    <section id="donation" class="panel donation hidden">
+      <h3 class="donation-title">💜 Curtiu? Apoie o projeto</h3>
+      <p class="donation-text">Escaneie o QR Code com o app do seu banco — qualquer valor ajuda a manter o site grátis.</p>
+      <div class="qr-card"><div id="pix-qr"></div></div>
+      <button id="pix-copy" class="btn-primary">📋 PIX copia e cola</button>
+    </section>
+    </div>
+
     <!-- ============ PREVIEW / RESULTADO ============ -->
     <section class="panel preview-panel">
       <div class="phone-frame">
@@ -111,6 +122,8 @@
     </section>
   </main>
 
+  <script src="js/vendor/qrcode-generator.js"></script>
+  <script src="js/pix.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>

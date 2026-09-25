@@ -276,6 +276,7 @@ function showResult(blob, mime, script) {
 
   els.result.classList.remove('hidden');
   els.result.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  if (typeof showDonation === 'function') showDonation();
 }
 
 // ---------- eventos ----------
