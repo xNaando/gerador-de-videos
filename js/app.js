@@ -4,7 +4,7 @@
 //   → gravação Canvas+Áudio (MediaRecorder) → download
 // ============================================================
 
-import { generateScript, loadImageWithRetry, loadOpenverseImage, fetchTTSAudio } from './api.js';
+import { generateScript, loadImageWithRetry, loadOpenverseImage, fetchTTSAudio, searchPexelsClips, loadPexelsVideo } from './api.js';
 import { startMusic, scheduleNarration } from './audio.js';
 import { VideoRenderer } from './renderer.js';
 
@@ -22,7 +22,7 @@ const els = {
 
 const STEP_DEFS = [
   ['script', '✍️ Escrevendo o roteiro'],
-  ['assets', '🎨 Gerando imagens e narração'],
+  ['assets', '� Gerando cenas e narração'],
   ['record', '🎥 Gravando o vídeo'],
   ['done', '✅ Pronto!'],
 ];
@@ -31,6 +31,7 @@ let audioCtx = null;
 let currentRecorder = null;
 let rafId = null;
 let running = false;
+let usedRealVideo = false;
 
 // ---------- UI: passos ----------
 
@@ -58,6 +59,7 @@ function showError(msg) {
 async function buildScenes(script, nScenes, voiceIdx, style, onItem) {
   const scenes = script.scenes.slice(0, nScenes);
   const seedBase = Math.floor(Math.random() * 999999);
+  const usedClips = new Set();
   const totalItems = scenes.length * 2;
   let done = 0;
   const tick = () => onItem(++done / totalItems);
@@ -69,15 +71,27 @@ async function buildScenes(script, nScenes, voiceIdx, style, onItem) {
           .then(b => { sc.buffer = b; tick(); })
       : Promise.resolve(tick());
 
-    // Pollinations (IA) → Openverse (foto real) → gradiente
-    const imgP = loadImageWithRetry(sc.image_prompt, style, seedBase + i, 3, i * 2500)
-      .then(async (img) => {
-        if (!img) img = await loadOpenverseImage(sc.search || sc.image_prompt);
-        sc.image = img;
-        tick();
-      });
+    // Pexels (vídeo real) → Pollinations (IA) → Openverse (foto) → gradiente
+    const mediaP = (async () => {
+      try {
+        const clips = await searchPexelsClips(sc.search || sc.image_prompt);
+        const clip = clips.find(c => !usedClips.has(c.url)) || clips[0];
+        if (clip) {
+          usedClips.add(clip.url);
+          const v = await loadPexelsVideo(clip);
+          if (v) { sc.video = v; usedRealVideo = true; tick(); return; }
+          usedClips.delete(clip.url);
+        }
+      } catch (e) {
+        console.warn(`Pexels cena ${i} falhou:`, e);
+      }
+      let img = await loadImageWithRetry(sc.image_prompt, style, seedBase + i, 3, i * 2500);
+      if (!img) img = await loadOpenverseImage(sc.search || sc.image_prompt);
+      sc.image = img;
+      tick();
+    })();
 
-    await Promise.all([ttsP, imgP]);
+    await Promise.all([ttsP, mediaP]);
   }));
 
   // timeline: duração da cena = áudio + respiro (ou 4.2s sem voz)
@@ -160,6 +174,9 @@ function attemptRecord(mime, dest, scenes, total, musicStyle) {
 
     try { rec.start(400); } catch (e) { return fail(e); }
 
+    // clipes Pexels tocam mutados em loop durante a gravação
+    for (const s of scenes) if (s.video) s.video.play().catch(() => {});
+
     renderer.draw(0);
     const voiceSegs = scenes.filter(s => s.buffer)
       .map(s => ({ start: s.start, end: s.start + s.buffer.duration }));
@@ -226,6 +243,8 @@ async function run() {
   const style = els.style.value;
   const music = els.music.value;
   const nScenes = Number(els.scenes.value);
+  let builtScenes = null;
+  usedRealVideo = false;
 
   try {
     // 1. roteiro
@@ -241,6 +260,7 @@ async function run() {
       setProgress(0.2 + 0.35 * frac);
       drawIdleFrame(els.stage, `Gerando cenas... ${Math.round(frac * 100)}%`);
     });
+    builtScenes = scenes;
 
     // 3. gravação
     renderSteps('record');
@@ -255,6 +275,10 @@ async function run() {
     showError(`Algo deu errado: ${e.message}. Tente novamente.`);
     els.overlay.classList.remove('hidden');
   } finally {
+    // libera os clipes após a gravação (memória + decodificadores)
+    if (builtScenes) for (const s of builtScenes) {
+      if (s.video) { try { s.video.pause(); s.video.src = ''; } catch {} }
+    }
     running = false;
     els.generate.disabled = false;
   }
@@ -273,6 +297,7 @@ function showResult(blob, mime, script) {
   els.formatNote.textContent = isMp4
     ? 'Formato MP4 — pronto pra postar no TikTok e Instagram.'
     : 'Formato WebM — o TikTok aceita direto. Para o Instagram, converta para MP4 (ex: cloudconvert.com).';
+  if (usedRealVideo) els.formatNote.textContent += ' · 🎞️ Clipes por Pexels.com';
 
   els.result.classList.remove('hidden');
   els.result.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

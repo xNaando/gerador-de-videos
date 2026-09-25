@@ -81,6 +81,22 @@ export class VideoRenderer {
     ctx.drawImage(img, (W - dw) / 2 + panX, (H - dh) / 2 + panY, dw, dh);
   }
 
+  // vídeo real: cover 9:16 + zoom lento p/ cortes parecerem dirigidos
+  drawVideoCover(v, localT, dur) {
+    const ctx = this.ctx;
+    const p = Math.min(1, Math.max(0, localT / dur));
+    const iw = v.videoWidth || 720, ih = v.videoHeight || 1280;
+    const cover = Math.max(W / iw, H / ih) * (1 + p * 0.05);
+    const dw = iw * cover, dh = ih * cover;
+    ctx.drawImage(v, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  }
+
+  drawSceneMedia(scene, localT, dur, idx, t) {
+    if (scene.video && scene.video.readyState >= 2) this.drawVideoCover(scene.video, localT, dur);
+    else if (scene.image) this.drawImageCover(scene.image, localT, dur, idx);
+    else this.drawGradientBG(t + idx * 7);
+  }
+
   drawGradientBG(localT) {
     const ctx = this.ctx;
     const hue = (localT * 30) % 360;
@@ -252,15 +268,12 @@ export class VideoRenderer {
     ctx.fillRect(0, 0, W, H);
 
     if (prev && localT < FADE) {
-      if (prev.image) this.drawImageCover(prev.image, prev.end - prev.start, prev.end - prev.start, idx - 1);
-      else this.drawGradientBG(t);
+      this.drawSceneMedia(prev, prev.end - prev.start, prev.end - prev.start, idx - 1, t);
       ctx.globalAlpha = localT / FADE;
-      if (scene.image) this.drawImageCover(scene.image, localT, dur, idx);
-      else this.drawGradientBG(t + idx * 7);
+      this.drawSceneMedia(scene, localT, dur, idx, t);
       ctx.globalAlpha = 1;
     } else {
-      if (scene.image) this.drawImageCover(scene.image, localT, dur, idx);
-      else this.drawGradientBG(t + idx * 7);
+      this.drawSceneMedia(scene, localT, dur, idx, t);
     }
 
     this.drawOverlays();

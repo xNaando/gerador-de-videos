@@ -269,6 +269,96 @@ export async function loadOpenverseImage(query) {
   return null;
 }
 
+// ---------- Vídeos reais via Pexels (chave gratuita) ----------
+// Chave grátis em https://www.pexels.com/api/ (200 req/h, sai na hora).
+// Vazia → o app cai pro modo de imagens automaticamente.
+export const PEXELS_KEY = 'AnZLhstTW1zxjTu7wa8Q7SCcponqK95ziKKZEKONkN9fx2O1fci3TX2q';
+const pexelsCache = new Map();
+
+// cota estourada (429/401/403) → modo imagem por ~1h, depois tenta de novo.
+// persistido em sessionStorage p/ não gastar requisição em reloads na mesma aba.
+let pexelsDeadUntil = 0;
+try { pexelsDeadUntil = Number(sessionStorage.getItem('pexels_dead_until')) || 0; } catch {}
+
+function markPexelsDead() {
+  pexelsDeadUntil = Date.now() + 60 * 60 * 1000;
+  try { sessionStorage.setItem('pexels_dead_until', String(pexelsDeadUntil)); } catch {}
+  console.warn('[pexels] cota esgotada — gerando com imagens por ~1h');
+}
+
+function pexelsAlive() {
+  return !!PEXELS_KEY && Date.now() > pexelsDeadUntil;
+}
+
+// escolhe o arquivo mp4 mais próximo de 720x1280 (evita UHD pesado)
+function pickPexelsFile(video) {
+  const files = (video.video_files || []).filter(f => f.file_type === 'video/mp4' && f.link);
+  if (!files.length) return null;
+  const portrait = files.filter(f => (f.height || 0) >= (f.width || 0));
+  const pool = portrait.length ? portrait : files;
+  const score = (f) =>
+    Math.abs((f.width || 720) - 720) / 720 +
+    Math.abs((f.height || 1280) - 1280) / 1280 +
+    (f.quality === 'uhd' ? 1 : 0) +
+    ((f.height || 0) > 1600 ? 0.5 : 0);
+  pool.sort((a, b) => score(a) - score(b));
+  const f = pool[0];
+  return { url: f.link, width: f.width, height: f.height };
+}
+
+async function pexelsSearch(query, orientation) {
+  const params = new URLSearchParams({ query, per_page: '15' });
+  if (orientation) params.set('orientation', orientation);
+  const res = await fetch(`https://api.pexels.com/v1/videos/search?${params}`, {
+    headers: { Authorization: PEXELS_KEY },
+  });
+  if (res.status === 429 || res.status === 401 || res.status === 403) {
+    markPexelsDead();
+    return [];
+  }
+  if (!res.ok) throw new Error(`Pexels HTTP ${res.status}`);
+  const data = await res.json();
+  return (data.videos || []).map(pickPexelsFile).filter(Boolean);
+}
+
+// clipes p/ um tema — portrait primeiro, qualquer orientação como plano B
+export async function searchPexelsClips(query) {
+  if (!pexelsAlive()) return [];
+  const key = String(query || '').toLowerCase().trim().slice(0, 80);
+  if (!key) return [];
+  if (!pexelsCache.has(key)) {
+    let clips = [];
+    try {
+      clips = await pexelsSearch(key, 'portrait');
+      if (!clips.length) clips = await pexelsSearch(key, null);
+    } catch (e) {
+      console.warn('Pexels falhou:', e);
+    }
+    pexelsCache.set(key, clips);
+  }
+  return pexelsCache.get(key);
+}
+
+// cria <video> mutado+loop p/ desenhar no canvas (CDN da Pexels tem CORS *)
+export function loadPexelsVideo(clip, timeoutMs = 45000) {
+  return new Promise((resolve) => {
+    const v = document.createElement('video');
+    v.crossOrigin = 'anonymous';
+    v.muted = true;
+    v.loop = true;
+    v.playsInline = true;
+    v.preload = 'auto';
+    const timer = setTimeout(() => { v.src = ''; resolve(null); }, timeoutMs);
+    const done = (ok) => { clearTimeout(timer); resolve(ok ? v : null); };
+    v.onloadedmetadata = () => {
+      try { v.currentTime = Math.random() * Math.max(0, (v.duration || 0) - 4); } catch {}
+    };
+    v.oncanplaythrough = () => done(true);
+    v.onerror = () => done(false);
+    v.src = clip.url;
+  });
+}
+
 // ---------- Narração (TTS) ----------
 
 // Divide texto longo em pedaços (limite da API: ~1950 chars)
