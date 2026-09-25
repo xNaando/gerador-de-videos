@@ -22,7 +22,7 @@ const els = {
 
 const STEP_DEFS = [
   ['script', '✍️ Escrevendo o roteiro'],
-  ['assets', '� Gerando cenas e narração'],
+  ['assets', '🎬 Gerando cenas e narração'],
   ['record', '🎥 Gravando o vídeo'],
   ['done', '✅ Pronto!'],
 ];
@@ -37,9 +37,10 @@ let usedRealVideo = false;
 
 function renderSteps(activeId) {
   const activeIdx = STEP_DEFS.findIndex(([id]) => id === activeId);
+  const allDone = activeId === 'done';
   els.steps.innerHTML = STEP_DEFS.map(([id, label], i) => {
     let cls = '', icon = '○';
-    if (i < activeIdx) { cls = 'done'; icon = '✓'; }
+    if (allDone || i < activeIdx) { cls = 'done'; icon = '✓'; }
     else if (i === activeIdx) { cls = 'active'; icon = '<span class="spinner"></span>'; }
     return `<li class="${cls}">${icon} ${label}</li>`;
   }).join('');
@@ -233,6 +234,7 @@ async function run() {
   els.errorBox.classList.add('hidden');
   els.result.classList.add('hidden');
   els.progress.classList.remove('hidden');
+  if (typeof startMinigame === 'function') startMinigame();
   setProgress(0.03);
 
   // AudioContext precisa nascer no gesto do usuário p/ não ficar suspenso
@@ -274,6 +276,7 @@ async function run() {
     console.error(e);
     showError(`Algo deu errado: ${e.message}. Tente novamente.`);
     els.overlay.classList.remove('hidden');
+    if (typeof stopMinigame === 'function') stopMinigame();
   } finally {
     // libera os clipes após a gravação (memória + decodificadores)
     if (builtScenes) for (const s of builtScenes) {
@@ -302,6 +305,7 @@ function showResult(blob, mime, script) {
   els.result.classList.remove('hidden');
   els.result.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   if (typeof showDonation === 'function') showDonation();
+  if (typeof stopMinigame === 'function') stopMinigame();
 }
 
 // ---------- eventos ----------
@@ -309,6 +313,7 @@ function showResult(blob, mime, script) {
 els.generate.addEventListener('click', run);
 
 els.regen.addEventListener('click', () => {
+  if (typeof stopMinigame === 'function') stopMinigame();
   els.result.classList.add('hidden');
   els.progress.classList.add('hidden');
   els.overlay.classList.remove('hidden');
