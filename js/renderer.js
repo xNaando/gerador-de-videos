@@ -217,17 +217,6 @@ export class VideoRenderer {
     ctx.restore();
   }
 
-  drawWatermark() {
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.font = '500 24px "Segoe UI", system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.globalAlpha = 0.6;
-    ctx.fillStyle = '#fff';
-    ctx.fillText('✨ gerado por IA', W / 2, H - 40);
-    ctx.restore();
-  }
-
   drawEndCard(scene, localT) {
     const ctx = this.ctx;
     const dur = scene.end - scene.start;
@@ -282,6 +271,5 @@ export class VideoRenderer {
     this.drawCaptions(scene, localT);
     this.drawEndCard(scene, localT);
     this.drawProgress(t);
-    this.drawWatermark();
   }
 }
